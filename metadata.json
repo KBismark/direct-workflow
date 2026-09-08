@@ -1,0 +1,6 @@
+{
+  "name": "Institutional Form & Sheet Manager",
+  "description": "Multi-institution form submission manager with secure unique links, spreadsheet dashboard, approval workflows, and REST API integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
