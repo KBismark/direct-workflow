@@ -1,6 +1,7 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
 import { Request, Response } from 'express';
+import { FormSubmissionData } from '../types.js';
 import { db, getDefaultSheetTabName, generateInstitutionCode, reverseEngineerInstitutionCode } from './db.js';
 import { syncInstitutionsWithMasterSheet } from './masterSheet.js';
 
@@ -156,4 +157,119 @@ export async function getInstitutionFromPostgresById(id: number | string) {
     console.warn(`PostgreSQL lookup error for id ${id}:`, err.message);
   }
   return undefined;
+}
+
+type ApplicantDetailsData = Pick<
+  FormSubmissionData,
+  | 'SURNAME'
+  | 'OTHER_NAME'
+  | 'DATE_OF_EMPLOYMENT'
+  | 'GENDER'
+  | 'DATE_OF_BIRTH'
+  | 'MARITAL_STATUS'
+  | 'RESIDENTIAL_DIGITAL_ADDRESS'
+  | 'PERSONNEL_MOBILE'
+  | 'INSTITUTION_NAME'
+  | 'MONTHLY_NET_SALARY'
+  | 'GHANA_CARD_NUMBER'
+  | 'GUARANTOR_FULL_NAME'
+  | 'GUARANTOR_MOBILE_NUMBER'
+  | 'NAME_OF_BANK'
+  | 'BANK_ACCOUNT_NUMBER'
+>;
+
+const applicantDetailsColumns = [
+  'sname',
+  'oname',
+  'joining_date',
+  'date_of_employment',
+  'gender',
+  'dob',
+  'mstatus',
+  'address',
+  'mobile',
+  'cno',
+  'mobile_number',
+  'department',
+  'monthly_net_salary',
+  'staff_id',
+  'ghana_card_number',
+  'guarantor_name',
+  'guarantor_contact',
+  'bank',
+  'accnum',
+];
+
+const toNullableString = (value: unknown): string | null => {
+  if (value === undefined || value === null) return null;
+  const text = String(value);
+  return text === '' ? null : text;
+};
+
+const toNullableNumber = (value: unknown, fieldName: string): number | null => {
+  const raw = value === undefined || value === null ? '' : String(value).trim();
+  if (raw === '') return null;
+  const numberValue = Number(raw.replace(/,/g, ''));
+  if (!Number.isFinite(numberValue)) {
+    throw new Error(`${fieldName} must be a valid number`);
+  }
+  return numberValue;
+};
+
+const toDateValue = (value: unknown, fieldName: string): string | null => {
+  const raw = value === undefined || value === null ? '' : String(value).trim();
+  if (raw === '') return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new Error(`${fieldName} must be a valid date`);
+    }
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === 'number') {
+    if (Number.isFinite(value) && value > 0 && value < 100000) {
+      return new Date(Date.UTC(1899, 11, 30) + value * 86400000).toISOString().slice(0, 10);
+    }
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  throw new Error(`${fieldName} must be a valid date`);
+};
+
+export async function createApplicantDetails(applicantData: ApplicantDetailsData) {
+  const values = [
+    toNullableString(applicantData.SURNAME),
+    toNullableString(applicantData.OTHER_NAME),
+    toNullableString(applicantData.DATE_OF_EMPLOYMENT),
+    toDateValue(applicantData.DATE_OF_EMPLOYMENT, 'Date of Employment'),
+    toNullableString(applicantData.GENDER),
+    toNullableString(applicantData.DATE_OF_BIRTH),
+    toNullableString(applicantData.MARITAL_STATUS),
+    toNullableString(applicantData.RESIDENTIAL_DIGITAL_ADDRESS),
+    toNullableString(applicantData.PERSONNEL_MOBILE),
+    toNullableString(applicantData.PERSONNEL_MOBILE),
+    toNullableString(applicantData.PERSONNEL_MOBILE),
+    toNullableString(applicantData.INSTITUTION_NAME),
+    toNullableNumber(applicantData.MONTHLY_NET_SALARY, 'Monthly Net Salary'),
+    toNullableString(applicantData.GHANA_CARD_NUMBER),
+    toNullableString(applicantData.GHANA_CARD_NUMBER),
+    toNullableString(applicantData.GUARANTOR_FULL_NAME),
+    toNullableString(applicantData.GUARANTOR_MOBILE_NUMBER),
+    toNullableString(applicantData.NAME_OF_BANK),
+    toNullableString(applicantData.BANK_ACCOUNT_NUMBER),
+  ];
+
+  const placeholders = values.map((_, index) => `$${index + 1}`).join(', ');
+  const sql = `INSERT INTO public.applicant_details (${applicantDetailsColumns.join(', ')}) VALUES (${placeholders}) RETURNING id`;
+  const result = await pool.query(sql, values);
+  return result.rows?.[0] ? { id: result.rows[0].id } : null;
 }

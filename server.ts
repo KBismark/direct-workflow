@@ -3,6 +3,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { db, getDefaultSheetTabName, reverseEngineerInstitutionCode } from './src/server/db.js';
 import { getInstitutions, ensureInstitutionsLoaded, getInstitutionFromPostgresById } from './src/server/postgres.js';
+import { createApplicantDetails } from './src/server/postgres.js';
 import {
   syncSubmissionToGoogleSheet,
   testGoogleSheetWebhook,
@@ -352,6 +353,29 @@ async function startServer() {
     // Keep local cache in sync if record exists
     if (localRecord) {
       db.updateSubmissionStatus(localRecord.id, status, notes, reviewedBy);
+    }
+
+    // Save mapped applicant details in PostgreSQL before sending SMS
+    const applicantData = req.body.applicantData ?? localRecord;
+    let applicantDetailsResult: any = null;
+
+    if (status === 'APPROVED') {
+      if (!applicantData) {
+        return res.status(400).json({
+          success: false,
+          error: 'Applicant details are required before an approved response can be saved to PostgreSQL.',
+        });
+      }
+
+      try {
+        applicantDetailsResult = await createApplicantDetails(applicantData);
+      } catch (err: any) {
+        console.error('Error saving approved applicant details to PostgreSQL:', err);
+        return res.status(500).json({
+          success: false,
+          error: `Failed to save approved applicant details: ${err.message}`,
+        });
+      }
     }
 
     // 2. If approved, trigger Hubtel SMS

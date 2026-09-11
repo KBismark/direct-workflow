@@ -133,6 +133,7 @@ export const apiClient = {
       referenceNumber?: string;
       mobile?: string;
       surname?: string;
+      applicantData?: FormSubmissionData;
     }
   ): Promise<FormSubmissionRecord> {
     const res = await fetch(`/api/responses/${responseId}/status`, {
@@ -145,6 +146,7 @@ export const apiClient = {
         referenceNumber: meta?.referenceNumber,
         mobile: meta?.mobile,
         surname: meta?.surname,
+        applicantData: meta?.applicantData,
       }),
     });
     const json: ApiResponse<FormSubmissionRecord> = await res.json();

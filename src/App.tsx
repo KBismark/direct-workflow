@@ -192,6 +192,7 @@ export default function App() {
       referenceNumber: selectedRecord?.referenceNumber || id,
       mobile: selectedRecord?.PERSONNEL_MOBILE,
       surname: selectedRecord?.SURNAME,
+      applicantData: selectedRecord,
     });
     await loadInstitutions();
     if (selectedRecord && selectedRecord.id === id) {

@@ -105,6 +105,7 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({
           referenceNumber: recordToApprove.referenceNumber || recordToApprove.id,
           mobile: recordToApprove.PERSONNEL_MOBILE,
           surname: recordToApprove.SURNAME,
+          applicantData: recordToApprove,
         }
       );
       setSubmissions(prev => prev.map(s => (s.id === recordToApprove.id ? updated : s)));
