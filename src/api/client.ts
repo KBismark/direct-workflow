@@ -78,12 +78,19 @@ export const apiClient = {
     return json.data;
   },
 
-  // Get spreadsheet responses for an institution
+  // Get spreadsheet responses for an institution (acting directly on Google Spreadsheet database)
   async getInstitutionResponses(
     institutionId: string,
     query?: string,
     status?: string
-  ): Promise<{ institution: any; total: number; data: FormSubmissionRecord[] }> {
+  ): Promise<{
+    institution: any;
+    total: number;
+    data: FormSubmissionRecord[];
+    source?: string;
+    message?: string;
+    sheetTabName?: string;
+  }> {
     const params = new URLSearchParams();
     if (query) params.set('q', query);
     if (status && status !== 'ALL') params.set('status', status);
@@ -96,16 +103,29 @@ export const apiClient = {
     return json;
   },
 
-  // Approve or Reject response
+  // Approve or Reject response directly in Google Spreadsheet
   async updateResponseStatus(
     responseId: string,
     status: 'APPROVED' | 'REJECTED',
-    notes?: string
+    notes?: string,
+    meta?: {
+      institutionId?: string;
+      referenceNumber?: string;
+      mobile?: string;
+      surname?: string;
+    }
   ): Promise<FormSubmissionRecord> {
     const res = await fetch(`/api/responses/${responseId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, notes }),
+      body: JSON.stringify({
+        status,
+        notes,
+        institutionId: meta?.institutionId,
+        referenceNumber: meta?.referenceNumber,
+        mobile: meta?.mobile,
+        surname: meta?.surname,
+      }),
     });
     const json: ApiResponse<FormSubmissionRecord> = await res.json();
     if (!json.success || !json.data) {

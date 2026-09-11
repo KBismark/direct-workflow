@@ -138,7 +138,12 @@ export default function App() {
   };
 
   const handleApproveRecord = async (id: string, notes?: string) => {
-    const updated = await apiClient.updateResponseStatus(id, 'APPROVED', notes);
+    const updated = await apiClient.updateResponseStatus(id, 'APPROVED', notes, {
+      institutionId: selectedRecord?.institutionId || selectedInstitution?.id,
+      referenceNumber: selectedRecord?.referenceNumber || id,
+      mobile: selectedRecord?.PERSONNEL_MOBILE,
+      surname: selectedRecord?.SURNAME,
+    });
     await loadInstitutions();
     if (selectedRecord && selectedRecord.id === id) {
       setSelectedRecord(updated);
@@ -146,7 +151,12 @@ export default function App() {
   };
 
   const handleRejectRecord = async (id: string, reason?: string) => {
-    const updated = await apiClient.updateResponseStatus(id, 'REJECTED', reason);
+    const updated = await apiClient.updateResponseStatus(id, 'REJECTED', reason, {
+      institutionId: selectedRecord?.institutionId || selectedInstitution?.id,
+      referenceNumber: selectedRecord?.referenceNumber || id,
+      mobile: selectedRecord?.PERSONNEL_MOBILE,
+      surname: selectedRecord?.SURNAME,
+    });
     await loadInstitutions();
     if (selectedRecord && selectedRecord.id === id) {
       setSelectedRecord(updated);

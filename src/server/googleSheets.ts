@@ -314,9 +314,9 @@ export async function fetchResponsesFromGoogleSheet(
               SURNAME: surname,
               OTHER_NAME: getVal(4),
               DATE_OF_EMPLOYMENT: getVal(5),
-              GENDER: getVal(6),
+              GENDER: (getVal(6) || '') as any,
               DATE_OF_BIRTH: getVal(7),
-              MARITAL_STATUS: getVal(8),
+              MARITAL_STATUS: (getVal(8) || '') as any,
               RESIDENTIAL_DIGITAL_ADDRESS: getVal(9),
               PERSONNEL_MOBILE: getVal(10),
               INSTITUTION_NAME: getVal(11) || institution.name,
@@ -531,12 +531,76 @@ export function getGoogleAppsScriptTemplate(): string {
  * 5. Copy the Web app URL (ends with /exec) and paste it into this app's "Sheet Webhook URL" field.
  */
 
-// Handles GET requests for testing in browser or health checks
+// Handles GET requests (for browser test, connection check, or direct data fetch)
 function doGet(e) {
-  return ContentService.createTextOutput(JSON.stringify({
-    status: "success",
-    message: "Google Apps Script Webhook is active and connected."
-  })).setMimeType(ContentService.MimeType.JSON);
+  try {
+    var action = e && e.parameter ? e.parameter.action : null;
+    if (action === "FETCH_RESPONSES") {
+      var tabName = (e && e.parameter && e.parameter.tabName) ? e.parameter.tabName : "Responses";
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var sheet = ss.getSheetByName(tabName);
+      if (!sheet) {
+        return ContentService.createTextOutput(JSON.stringify({ status: "success", data: [], message: "Sheet tab not created yet" }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      var records = readSheetRows(sheet);
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", data: records }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "success",
+      message: "Google Apps Script Webhook is active and connected."
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// Helper to convert sheet rows into response objects
+function readSheetRows(sheet) {
+  var values = sheet.getDataRange().getValues();
+  if (!values || values.length <= 1) return [];
+  var list = [];
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    var ref = row[1] ? row[1].toString() : "";
+    var surname = row[3] ? row[3].toString() : "";
+    if (!ref && !surname) continue;
+
+    list.push({
+      id: ref || ("row_" + r),
+      referenceNumber: ref,
+      status: row[0] || "PENDING",
+      submittedAt: row[2] ? new Date(row[2]).toISOString() : "",
+      SURNAME: surname,
+      OTHER_NAME: row[4] || "",
+      DATE_OF_EMPLOYMENT: row[5] ? row[5].toString() : "",
+      GENDER: row[6] || "",
+      DATE_OF_BIRTH: row[7] ? row[7].toString() : "",
+      MARITAL_STATUS: row[8] || "",
+      RESIDENTIAL_DIGITAL_ADDRESS: row[9] || "",
+      PERSONNEL_MOBILE: row[10] ? row[10].toString() : "",
+      INSTITUTION_NAME: row[11] || "",
+      MONTHLY_NET_SALARY: row[12] ? row[12].toString() : "",
+      GHANA_CARD_NUMBER: row[13] || "",
+      PLACE_OF_WORK_DIGITAL_ADDRESS: row[14] || "",
+      GUARANTOR_FULL_NAME: row[15] || "",
+      GUARANTOR_MOBILE_NUMBER: row[16] ? row[16].toString() : "",
+      GUARANTOR_PLACE_OF_WORK: row[17] || "",
+      GUARANTOR_DIGITAL_ADDRESS: row[18] || "",
+      GUARANTOR_JOB_DETAIL: row[19] || "",
+      GUARANTOR_NET_SALARY: row[20] ? row[20].toString() : "",
+      NAME_OF_BANK: row[21] || "",
+      BRANCH: row[22] || "",
+      BANK_ACCOUNT_NUMBER: row[23] ? row[23].toString() : "",
+      approvalNotes: row[24] || "",
+      rejectionReason: row[24] || "",
+      smsStatus: row[25] || (row[0] === "APPROVED" ? "SENT" : "")
+    });
+  }
+  return list;
 }
 
 // Handles POST requests from the form web app
@@ -589,16 +653,16 @@ function doPost(e) {
         sheet = ss.insertSheet(sheetName);
       }
 
-      // Add Header Row with all 21 fields + Administrative Status
+      // Add Header Row with all 21 fields + Administrative Status + SMS Status
       sheet.appendRow([
         "Status", "Reference", "Submitted At", "Surname", "Other Name",
         "Employment Date", "Gender", "Date of Birth", "Marital Status",
         "Residential Address", "Personnel Mobile", "Institution", "Monthly Net Salary",
         "Ghana Card Number", "Work Address", "Guarantor Name", "Guarantor Mobile",
         "Guarantor Work", "Guarantor Address", "Guarantor Job", "Guarantor Net Salary",
-        "Bank Name", "Branch", "Account Number", "Notes/Reason"
+        "Bank Name", "Branch", "Account Number", "Notes/Reason", "SMS Status"
       ]);
-      sheet.getRange(1, 1, 1, 25).setFontWeight("bold").setBackground("#e2e8f0");
+      sheet.getRange(1, 1, 1, 26).setFontWeight("bold").setBackground("#e2e8f0");
       sheet.setFrozenRows(1);
     }
 
@@ -606,6 +670,17 @@ function doPost(e) {
     try {
       ss.setActiveSheet(sheet);
     } catch(err) {}
+
+    // Direct fetch from Google Sheet (acting as the institutional database)
+    if (data.action === "FETCH_RESPONSES") {
+      var records = readSheetRows(sheet);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        tabName: sheetName,
+        count: records.length,
+        data: records
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
 
     // Support batch sync of multiple rows
     if (data.action === "BATCH_SYNC" && Array.isArray(data.submissions)) {
@@ -637,7 +712,8 @@ function doPost(e) {
           s.NAME_OF_BANK || "",
           s.BRANCH || "",
           s.BANK_ACCOUNT_NUMBER || "",
-          s.approvalNotes || s.rejectionReason || ""
+          s.approvalNotes || s.rejectionReason || "",
+          s.smsStatus || ""
         ]);
         added++;
       }
@@ -652,19 +728,24 @@ function doPost(e) {
     }
 
     if (data.action === "UPDATE_STATUS") {
-      // Find row by reference number or ID and update status
+      // Find row by reference number or ID and update status directly in the sheet
       var values = sheet.getDataRange().getValues();
       for (var r = 1; r < values.length; r++) {
-        if (values[r][1] == sub.referenceNumber || values[r][0] == sub.referenceNumber) {
+        if (values[r][1] == sub.referenceNumber || values[r][0] == sub.referenceNumber || (sub.id && values[r][1] == sub.id)) {
           sheet.getRange(r + 1, 1).setValue(sub.status);
           sheet.getRange(r + 1, 25).setValue(sub.approvalNotes || sub.rejectionReason || "");
-          return ContentService.createTextOutput(JSON.stringify({ status: "updated", row: r + 1 }))
+          if (sub.smsStatus) {
+            sheet.getRange(r + 1, 26).setValue(sub.smsStatus);
+          }
+          return ContentService.createTextOutput(JSON.stringify({ status: "success", updated: true, row: r + 1, referenceNumber: sub.referenceNumber }))
             .setMimeType(ContentService.MimeType.JSON);
         }
       }
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Reference number not found in sheet: " + sub.referenceNumber }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Otherwise append new row
+    // Otherwise append new row directly from form submission
     sheet.appendRow([
       sub.status || "PENDING",
       sub.referenceNumber || "",
@@ -690,7 +771,8 @@ function doPost(e) {
       sub.NAME_OF_BANK || "",
       sub.BRANCH || "",
       sub.BANK_ACCOUNT_NUMBER || "",
-      sub.approvalNotes || sub.rejectionReason || ""
+      sub.approvalNotes || sub.rejectionReason || "",
+      sub.smsStatus || ""
     ]);
 
     return ContentService.createTextOutput(JSON.stringify({ status: "success", referenceNumber: sub.referenceNumber }))

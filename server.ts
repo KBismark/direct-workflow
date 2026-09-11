@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { db } from './src/server/db.js';
+import { db, getDefaultSheetTabName } from './src/server/db.js';
 import { getInstitutions, ensureInstitutionsLoaded } from './src/server/postgres.js';
 import {
   syncSubmissionToGoogleSheet,
@@ -9,9 +9,11 @@ import {
   syncAllSubmissionsToGoogleSheet,
   generateSubmissionsCsv,
   getGoogleAppsScriptTemplate,
+  fetchResponsesFromGoogleSheet,
+  updateStatusInGoogleSheet,
 } from './src/server/googleSheets.js';
 import { sendSms } from './src/server/sms.js';
-import { FormSubmissionData } from './src/types.js';
+import { FormSubmissionData, FormSubmissionRecord } from './src/types.js';
 
 const PORT = 3000;
 
@@ -129,52 +131,93 @@ async function startServer() {
     // Ensure the institution name matches the bound institution
     payload.INSTITUTION_NAME = inst.name;
 
-    // Create record in database
-    const record = db.createSubmission(inst, payload);
+    // Generate unique reference number for the spreadsheet row
+    const referenceNumber = `REF-${inst.code.toUpperCase()}-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
 
-    // Asynchronously push to the institution's Google Sheet Webhook if configured
+    const submissionRecord: FormSubmissionRecord = {
+      id: referenceNumber,
+      referenceNumber,
+      institutionId: inst.id,
+      institutionName: inst.name,
+      status: 'PENDING',
+      submittedAt: new Date().toISOString(),
+      ...payload,
+      syncedToGoogleSheet: false,
+    };
+
+    // Forward directly to the institution's Google Spreadsheet (acting as the database)
     let sheetSyncResult: any = null;
     if (inst.sheetWebhookUrl) {
-      sheetSyncResult = await syncSubmissionToGoogleSheet(inst, record, 'NEW_SUBMISSION');
+      sheetSyncResult = await syncSubmissionToGoogleSheet(inst, submissionRecord, 'NEW_SUBMISSION');
+    } else {
+      // If no webhook configured yet, save to local memory so demo works, but inform user
+      db.createSubmission(inst, payload);
     }
 
     res.status(201).json({
       success: true,
       data: {
-        id: record.id,
-        referenceNumber: record.referenceNumber,
+        id: submissionRecord.id,
+        referenceNumber: submissionRecord.referenceNumber,
         institutionName: inst.name,
-        submittedAt: record.submittedAt,
-        status: record.status,
+        submittedAt: submissionRecord.submittedAt,
+        status: submissionRecord.status,
         sheetSync: sheetSyncResult,
       },
-      message: 'Form submitted successfully.',
+      message: inst.sheetWebhookUrl
+        ? 'Form response submitted directly to institution Google Spreadsheet tab.'
+        : 'Form submitted. Notice: Connect your Google Sheet Webhook URL in settings to save directly to your Google Spreadsheet database.',
     });
   });
 
   // -------------------------------------------------------------
   // API: Spreadsheet Responses & Administration
+  // Direct Google Spreadsheet Database: Single source of truth
   // -------------------------------------------------------------
 
-  // Get all submissions for an institution (acting as the spreadsheet data API)
-  app.get('/api/institutions/:id/responses', (req: Request, res: Response) => {
+  // Get all submissions for an institution directly from Google Spreadsheet
+  app.get('/api/institutions/:id/responses', async (req: Request, res: Response) => {
     const inst = db.getInstitutionById(req.params.id);
     if (!inst) {
       return res.status(404).json({ success: false, error: 'Institution not found.' });
     }
 
-    let records = db.getSubmissions(inst.id);
+    let records: FormSubmissionRecord[] = [];
+    let source: string = 'google_sheet';
+    let message: string = '';
+
+    // 1. Fetch live directly from the institution's Google Spreadsheet tab
+    const sheetResult = await fetchResponsesFromGoogleSheet(inst);
+    if (sheetResult.success && sheetResult.data && sheetResult.data.length > 0) {
+      records = sheetResult.data;
+      source = sheetResult.source;
+      message = sheetResult.message;
+    } else if (sheetResult.success && sheetResult.data && sheetResult.data.length === 0) {
+      records = [];
+      source = sheetResult.source;
+      message = sheetResult.message || `No responses recorded yet in Google Sheet tab '${sheetResult.tabName}'.`;
+    } else if (inst.sheetWebhookUrl || inst.spreadsheetId) {
+      // Fallback if sheet network fetch failed
+      records = db.getSubmissions(inst.id);
+      source = 'local_cache';
+      message = `${sheetResult.message} Showing local cache.`;
+    } else {
+      // No spreadsheet connected yet
+      records = db.getSubmissions(inst.id);
+      source = 'unconnected_demo';
+      message = 'No Google Spreadsheet or Webhook URL configured. Connect your Google Sheet in settings to load live responses.';
+    }
 
     // Search query filter
     const q = (req.query.q as string || '').toLowerCase().trim();
     if (q) {
       records = records.filter(r =>
-        r.SURNAME.toLowerCase().includes(q) ||
-        r.OTHER_NAME.toLowerCase().includes(q) ||
-        r.GHANA_CARD_NUMBER.toLowerCase().includes(q) ||
-        r.PERSONNEL_MOBILE.includes(q) ||
-        r.referenceNumber.toLowerCase().includes(q) ||
-        r.NAME_OF_BANK.toLowerCase().includes(q)
+        (r.SURNAME && r.SURNAME.toLowerCase().includes(q)) ||
+        (r.OTHER_NAME && r.OTHER_NAME.toLowerCase().includes(q)) ||
+        (r.GHANA_CARD_NUMBER && r.GHANA_CARD_NUMBER.toLowerCase().includes(q)) ||
+        (r.PERSONNEL_MOBILE && r.PERSONNEL_MOBILE.includes(q)) ||
+        (r.referenceNumber && r.referenceNumber.toLowerCase().includes(q)) ||
+        (r.NAME_OF_BANK && r.NAME_OF_BANK.toLowerCase().includes(q))
       );
     }
 
@@ -184,6 +227,8 @@ async function startServer() {
       records = records.filter(r => r.status === status);
     }
 
+    const tabName = inst.sheetTabName || getDefaultSheetTabName(inst.name);
+
     res.json({
       success: true,
       institution: {
@@ -191,8 +236,12 @@ async function startServer() {
         name: inst.name,
         code: inst.code,
         spreadsheetId: inst.spreadsheetId,
-        sheetTabName: inst.sheetTabName,
+        sheetTabName: tabName,
+        sheetWebhookUrl: Boolean(inst.sheetWebhookUrl),
       },
+      source,
+      sheetTabName: tabName,
+      message,
       total: records.length,
       data: records,
     });
@@ -208,9 +257,9 @@ async function startServer() {
   });
 
   // Action button: Approve or Reject a response
-  // Reflects in actual Google Sheet
+  // Reflects directly in the Google Spreadsheet tab and triggers SMS
   app.patch('/api/responses/:id/status', async (req: Request, res: Response) => {
-    const { status, notes, reviewedBy } = req.body;
+    const { status, notes, reviewedBy, institutionId, referenceNumber, mobile, surname } = req.body;
 
     if (!status || !['APPROVED', 'REJECTED'].includes(status)) {
       return res.status(400).json({
@@ -219,61 +268,86 @@ async function startServer() {
       });
     }
 
-    const updated = db.updateSubmissionStatus(req.params.id, status, notes, reviewedBy);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Submission record not found.' });
+    // Identify target institution and reference
+    let inst = institutionId ? db.getInstitutionById(institutionId) : null;
+    const targetRef = referenceNumber || req.params.id;
+
+    // Check if local cache exists
+    const localRecord = db.getSubmissionById(req.params.id);
+    if (!inst && localRecord) {
+      inst = db.getInstitutionById(localRecord.institutionId);
+    }
+    if (!inst) {
+      inst = db.getInstitutions()[0];
     }
 
-    const inst = db.getInstitutionById(updated.institutionId);
+    const applicantMobile = mobile || localRecord?.PERSONNEL_MOBILE || '';
+    const applicantSurname = surname || localRecord?.SURNAME || '';
+
+    // 1. Update status directly in Google Spreadsheet tab
     let sheetSyncResult: any = null;
-
-    if (inst) {
-      // Sync update to Google Sheet first so the approval reflects in the spreadsheet tab
-      sheetSyncResult = await syncSubmissionToGoogleSheet(inst, updated, 'UPDATE_STATUS');
+    if (inst && inst.sheetWebhookUrl) {
+      sheetSyncResult = await updateStatusInGoogleSheet(inst, {
+        referenceNumber: targetRef,
+        status,
+        notes,
+      });
     }
 
-    // After approval has reflected in the institution's spreadsheet tab, send SMS if approved
-    let smsResult: any = null;
-    let finalRecord = updated;
+    // Keep local cache in sync if record exists
+    if (localRecord) {
+      db.updateSubmissionStatus(localRecord.id, status, notes, reviewedBy);
+    }
 
-    if (status === 'APPROVED') {
+    // 2. If approved, trigger Hubtel SMS
+    let smsResult: any = null;
+    if (status === 'APPROVED' && applicantMobile) {
       try {
         smsResult = await sendSms({
-          mobile: updated.PERSONNEL_MOBILE,
-          surname: updated.SURNAME,
+          mobile: applicantMobile,
+          surname: applicantSurname,
         });
 
-        const smsData = {
-          smsSent: Boolean(smsResult?.success),
-          smsStatus: smsResult?.success ? 'SENT' : (smsResult?.skipped ? 'SKIPPED' : 'FAILED'),
-          smsSentAt: smsResult?.success ? new Date().toISOString() : undefined,
-          smsError: smsResult?.error || smsResult?.reason || undefined,
-        };
-
-        const withSms = db.updateSubmissionSms(updated.id, smsData);
-        if (withSms) {
-          finalRecord = withSms;
+        // Write SMS Status back to the spreadsheet row
+        if (inst && inst.sheetWebhookUrl && smsResult?.success) {
+          await updateStatusInGoogleSheet(inst, {
+            referenceNumber: targetRef,
+            status,
+            notes,
+            smsStatus: 'SENT',
+          });
         }
       } catch (err: any) {
-        console.error('Error in approval SMS process:', err);
+        console.error('Error sending SMS after approval:', err);
         smsResult = { success: false, error: err.message };
       }
     }
 
-    let message = `Response ${status.toLowerCase()} successfully and synchronized with Google Sheet.`;
+    const tabName = inst ? (inst.sheetTabName || getDefaultSheetTabName(inst.name)) : 'Spreadsheet';
+    let message = `Response ${status.toLowerCase()} directly in Google Sheet tab '${tabName}'.`;
     if (status === 'APPROVED') {
       if (smsResult?.success) {
-        message += ` SMS notification delivered to ${smsResult.recipient || updated.PERSONNEL_MOBILE}.`;
+        message += ` SMS notification delivered to ${applicantMobile}.`;
       } else if (smsResult?.skipped) {
         message += ` (SMS skipped: ${smsResult.reason})`;
       } else if (smsResult?.error) {
-        message += ` (SMS sending error: ${smsResult.error})`;
+        message += ` (SMS error: ${smsResult.error})`;
       }
     }
 
     res.json({
       success: true,
-      data: finalRecord,
+      data: {
+        id: req.params.id,
+        referenceNumber: targetRef,
+        status,
+        approvalNotes: status === 'APPROVED' ? notes : '',
+        rejectionReason: status === 'REJECTED' ? notes : '',
+        smsSent: Boolean(smsResult?.success),
+        smsStatus: smsResult?.success ? 'SENT' : (smsResult?.skipped ? 'SKIPPED' : 'FAILED'),
+        smsSentAt: smsResult?.success ? new Date().toISOString() : undefined,
+        smsError: smsResult?.error || smsResult?.reason || undefined,
+      },
       sheetSync: sheetSyncResult,
       sms: smsResult,
       message,

@@ -50,12 +50,16 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({
   const [recordToApprove, setRecordToApprove] = useState<FormSubmissionRecord | null>(null);
   const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [sheetSource, setSheetSource] = useState<string>('google_sheet');
+  const [sheetSourceMessage, setSheetSourceMessage] = useState<string>('');
 
   const fetchResponses = async () => {
     try {
       setIsLoading(true);
       const res = await apiClient.getInstitutionResponses(institution.id, searchTerm, statusFilter);
       setSubmissions(res.data);
+      if (res.source) setSheetSource(res.source);
+      if (res.message) setSheetSourceMessage(res.message);
     } catch (err) {
       console.error('Failed to load responses', err);
     } finally {
@@ -95,7 +99,13 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({
       const updated = await apiClient.updateResponseStatus(
         recordToApprove.id,
         'APPROVED',
-        'Approved by administrator from Spreadsheet View'
+        'Approved by administrator from Spreadsheet View',
+        {
+          institutionId: institution.id,
+          referenceNumber: recordToApprove.referenceNumber || recordToApprove.id,
+          mobile: recordToApprove.PERSONNEL_MOBILE,
+          surname: recordToApprove.SURNAME,
+        }
       );
       setSubmissions(prev => prev.map(s => (s.id === recordToApprove.id ? updated : s)));
       
@@ -131,7 +141,17 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({
 
     try {
       setProcessingId(record.id);
-      const updated = await apiClient.updateResponseStatus(record.id, 'REJECTED', reason);
+      const updated = await apiClient.updateResponseStatus(
+        record.id,
+        'REJECTED',
+        reason,
+        {
+          institutionId: institution.id,
+          referenceNumber: record.referenceNumber || record.id,
+          mobile: record.PERSONNEL_MOBILE,
+          surname: record.SURNAME,
+        }
+      );
       setSubmissions(prev => prev.map(s => (s.id === record.id ? updated : s)));
       showToast(`Rejected response for ${record.SURNAME}. Reflected in Google Sheet.`, 'info');
     } catch (err: any) {
@@ -312,6 +332,37 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
           </div>
+        </div>
+
+        {/* Live Spreadsheet Database Status Indicator */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 bg-slate-50/80 border border-slate-200 rounded-lg text-xs text-slate-600 shadow-2xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`inline-flex items-center gap-1.5 font-semibold px-2 py-0.5 rounded-full ${
+              sheetSource === 'google_apps_script' || sheetSource === 'google_sheet_gviz'
+                ? 'bg-emerald-100 text-emerald-800'
+                : institution.sheetWebhookUrl
+                ? 'bg-blue-100 text-blue-800'
+                : 'bg-amber-100 text-amber-800'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                sheetSource === 'google_apps_script' || sheetSource === 'google_sheet_gviz'
+                  ? 'bg-emerald-500 animate-pulse'
+                  : 'bg-amber-500'
+              }`} />
+              Database: Google Sheet Tab &lsquo;{institution.sheetTabName || getDefaultSheetTabName(institution.name)}&rsquo;
+            </span>
+            <span className="text-slate-300 hidden sm:inline">|</span>
+            <span className="text-slate-500 text-xs">
+              {sheetSourceMessage || 'Zero intermediary storage — queries and updates execute live against the Google Spreadsheet.'}
+            </span>
+          </div>
+          <button
+            onClick={fetchResponses}
+            className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 cursor-pointer ml-auto"
+          >
+            <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Fetch Fresh from Sheet</span>
+          </button>
         </div>
 
         {/* Table Container: Professional Polish Theme */}
