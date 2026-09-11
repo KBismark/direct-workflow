@@ -58,7 +58,7 @@ export const InstitutionsList: React.FC<InstitutionsListProps> = ({
 
   const handleCopyLink = (e: React.MouseEvent, tokenOrCode: string) => {
     e.stopPropagation();
-    const publicUrl = `${window.location.origin}/?code=${tokenOrCode}`;
+    const publicUrl = `${window.location.origin}/direct/${tokenOrCode}/form`;
     navigator.clipboard.writeText(publicUrl);
     setCopiedToken(tokenOrCode);
     setTimeout(() => setCopiedToken(null), 2500);
@@ -203,7 +203,7 @@ export const InstitutionsList: React.FC<InstitutionsListProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {institutions.map((inst) => {
             const formCode = inst.code || inst.secureToken;
-            const publicUrl = `${window.location.origin}/?code=${formCode}`;
+            const publicUrl = `${window.location.origin}/direct/${formCode}/form`;
             const isCopied = copiedToken === formCode || copiedToken === inst.secureToken;
             const sheetUrl = inst.spreadsheetId
               ? `https://docs.google.com/spreadsheets/d/${inst.spreadsheetId}/edit`
