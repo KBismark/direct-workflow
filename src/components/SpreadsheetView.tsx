@@ -163,7 +163,7 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({
   };
 
   const formCode = institution.code || institution.secureToken;
-  const publicUrl = `${window.location.origin}/?code=${formCode}`;
+  const publicUrl = `${window.location.origin}/direct/${formCode}/form`;
 
   const handleCopyPublicLink = () => {
     navigator.clipboard.writeText(publicUrl);

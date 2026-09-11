@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
   const handleCopyLink = () => {
     if (!selectedInstitution) return;
     const formCode = selectedInstitution.code || selectedInstitution.secureToken;
-    const url = `${window.location.origin}/?code=${formCode}`;
+    const url = `${window.location.origin}/direct/${formCode}/form`;
     navigator.clipboard.writeText(url);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
