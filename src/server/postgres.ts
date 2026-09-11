@@ -2,6 +2,7 @@ import pg from 'pg';
 import dotenv from 'dotenv';
 import { Request, Response } from 'express';
 import { db, getDefaultSheetTabName, generateInstitutionCode, reverseEngineerInstitutionCode } from './db.js';
+import { syncInstitutionsWithMasterSheet } from './masterSheet.js';
 
 dotenv.config();
 
@@ -110,6 +111,16 @@ export async function getInstitutions(req: Request, res: Response) {
 
 export async function ensureInstitutionsLoaded() {
   try {
+    // First load any persisted mappings from the Master Google Sheet
+    try {
+      const masterSync = await syncInstitutionsWithMasterSheet();
+      if (masterSync.success) {
+        console.log(`Master Sheet: Loaded ${masterSync.syncedCount} institution mapping(s).`);
+      }
+    } catch (mErr: any) {
+      console.warn('Master Sheet initial sync notice:', mErr.message);
+    }
+
     dotenv.config();
     const p = getPostgresPool();
     if (!p) {

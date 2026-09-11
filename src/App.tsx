@@ -8,6 +8,7 @@ import { CreateInstitutionModal } from './components/CreateInstitutionModal';
 import { GoogleSheetsModal } from './components/GoogleSheetsModal';
 import { ApiDocsModal } from './components/ApiDocsModal';
 import { ResponseDetailModal } from './components/ResponseDetailModal';
+import { MasterSheetModal } from './components/MasterSheetModal';
 import { Institution, FormSubmissionRecord, PaginationMeta } from './types';
 import { apiClient } from './api/client';
 
@@ -32,6 +33,7 @@ export default function App() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
   const [sheetModalInstitution, setSheetModalInstitution] = useState<Institution | null>(null);
+  const [isMasterSheetModalOpen, setIsMasterSheetModalOpen] = useState(false);
   const [isApiDocsOpen, setIsApiDocsOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<FormSubmissionRecord | null>(null);
 
@@ -267,6 +269,7 @@ export default function App() {
           onOpenCreateModal={() => setIsCreateModalOpen(true)}
           onOpenApiDocs={() => setIsApiDocsOpen(true)}
           onOpenSheetConfig={() => selectedInstitution && handleOpenSheetConfig(selectedInstitution)}
+          onOpenMasterSheetModal={() => setIsMasterSheetModalOpen(true)}
           onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
           onTestFormLink={handleTestFormLink}
         />
@@ -343,6 +346,15 @@ export default function App() {
         record={selectedRecord}
         onApprove={handleApproveRecord}
         onReject={handleRejectRecord}
+      />
+
+      <MasterSheetModal
+        isOpen={isMasterSheetModalOpen}
+        onClose={() => setIsMasterSheetModalOpen(false)}
+        onSyncComplete={() => {
+          loadInstitutions();
+          loadSidebarInstitutions();
+        }}
       />
     </div>
   );

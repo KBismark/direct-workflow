@@ -1,4 +1,4 @@
-import { Institution, FormSubmissionRecord, FormSubmissionData } from '../types.js';
+import { Institution, FormSubmissionRecord, FormSubmissionData, MasterSheetRowMapping } from '../types.js';
 
 export function getDefaultSheetTabName(name: string): string {
   if (!name || typeof name !== 'string') return 'Responses';
@@ -44,14 +44,98 @@ export function reverseEngineerInstitutionCode(code: any): number {
 class Database {
   private institutions: Institution[] = [];
   private submissions: FormSubmissionRecord[] = [];
+  private masterMappings: Map<string, MasterSheetRowMapping> = new Map();
 
   constructor() {
     this.init();
   }
 
   private init() {
-    this.institutions = [];
+    this.masterMappings = new Map();
     this.submissions = [];
+    this.seedDefaults();
+  }
+
+  private seedDefaults() {
+    this.institutions = [
+      {
+        id: '1',
+        name: 'Accra Technical University',
+        code: generateInstitutionCode(1),
+        secureToken: generateInstitutionCode(1),
+        spreadsheetId: '',
+        sheetWebhookUrl: '',
+        sheetTabName: 'Accra Technical Univ',
+        createdAt: new Date().toISOString(),
+        description: 'Tertiary public technical university based in Barnes Road, Accra, Ghana.',
+        contactEmail: 'admissions@atu.edu.gh',
+        totalSubmissions: 0,
+        pendingCount: 0,
+        approvedCount: 0,
+        rejectedCount: 0,
+      },
+      {
+        id: '2',
+        name: 'Kwame Nkrumah University of Science and Technology',
+        code: generateInstitutionCode(2),
+        secureToken: generateInstitutionCode(2),
+        spreadsheetId: '',
+        sheetWebhookUrl: '',
+        sheetTabName: 'KNUST Responses',
+        createdAt: new Date().toISOString(),
+        description: 'Premier science and technology university in Kumasi, Ashanti Region.',
+        contactEmail: 'registry@knust.edu.gh',
+        totalSubmissions: 0,
+        pendingCount: 0,
+        approvedCount: 0,
+        rejectedCount: 0,
+      },
+      {
+        id: '3',
+        name: 'University of Ghana, Legon',
+        code: generateInstitutionCode(3),
+        secureToken: generateInstitutionCode(3),
+        spreadsheetId: '',
+        sheetWebhookUrl: '',
+        sheetTabName: 'UG Legon Responses',
+        createdAt: new Date().toISOString(),
+        description: 'Oldest and largest public university in Ghana, located in Legon, Accra.',
+        contactEmail: 'info@ug.edu.gh',
+        totalSubmissions: 0,
+        pendingCount: 0,
+        approvedCount: 0,
+        rejectedCount: 0,
+      },
+    ];
+  }
+
+  public applyMasterSheetMappings(mappings: MasterSheetRowMapping[]): number {
+    let count = 0;
+    for (const m of mappings) {
+      if (!m.institutionId) continue;
+      const instId = String(m.institutionId).trim();
+      this.masterMappings.set(instId, m);
+      if (m.institutionCode) {
+        this.masterMappings.set(m.institutionCode.trim().toUpperCase(), m);
+      }
+
+      // Update existing in-memory institution if already loaded
+      const inst = this.institutions.find(
+        i => String(i.id) === instId || (m.institutionCode && i.code.toUpperCase() === m.institutionCode.trim().toUpperCase())
+      );
+
+      if (inst) {
+        if (m.spreadsheetId) inst.spreadsheetId = m.spreadsheetId;
+        if (m.sheetWebhookUrl) inst.sheetWebhookUrl = m.sheetWebhookUrl;
+        if (m.sheetTabName) inst.sheetTabName = m.sheetTabName;
+        count++;
+      }
+    }
+    return count;
+  }
+
+  public getMasterMappings(): MasterSheetRowMapping[] {
+    return Array.from(this.masterMappings.values());
   }
 
   public getInstitutions(): Institution[] {
@@ -112,6 +196,9 @@ class Database {
       const code = generateInstitutionCode(row.id);
       const secureToken = code;
 
+      // Check if Master Google Sheet has mapped spreadsheet or webhook for this institution
+      const mapped = this.masterMappings.get(id) || this.masterMappings.get(code.toUpperCase());
+
       let existing = this.institutions.find(i => String(i.id) === id);
 
       if (!existing) {
@@ -120,9 +207,9 @@ class Database {
           name: instName,
           code,
           secureToken,
-          spreadsheetId: '',
-          sheetWebhookUrl: '',
-          sheetTabName: defaultTab,
+          spreadsheetId: mapped?.spreadsheetId || '',
+          sheetWebhookUrl: mapped?.sheetWebhookUrl || '',
+          sheetTabName: mapped?.sheetTabName || defaultTab,
           createdAt: new Date().toISOString(),
           description: '',
           contactEmail: '',
@@ -132,7 +219,15 @@ class Database {
         existing.name = instName;
         existing.code = code;
         existing.secureToken = secureToken;
-        if (!existing.sheetTabName) {
+        if (mapped?.spreadsheetId && !existing.spreadsheetId) {
+          existing.spreadsheetId = mapped.spreadsheetId;
+        }
+        if (mapped?.sheetWebhookUrl && !existing.sheetWebhookUrl) {
+          existing.sheetWebhookUrl = mapped.sheetWebhookUrl;
+        }
+        if (mapped?.sheetTabName && (!existing.sheetTabName || existing.sheetTabName === defaultTab)) {
+          existing.sheetTabName = mapped.sheetTabName;
+        } else if (!existing.sheetTabName) {
           existing.sheetTabName = defaultTab;
         }
       }
@@ -201,6 +296,18 @@ class Database {
       id, // protect ID
       secureToken: updates.secureToken || this.institutions[idx].secureToken, // protect token unless explicitly changed
     };
+
+    const updated = this.institutions[idx];
+    // Keep internal master mappings updated as well
+    this.masterMappings.set(String(updated.id), {
+      institutionId: updated.id,
+      institutionName: updated.name,
+      institutionCode: updated.code,
+      spreadsheetId: updated.spreadsheetId || '',
+      sheetWebhookUrl: updated.sheetWebhookUrl || '',
+      sheetTabName: updated.sheetTabName || 'Responses',
+      updatedAt: new Date().toISOString(),
+    });
 
     return this.getInstitutionById(id) || null;
   }

@@ -83,3 +83,31 @@ export interface PaginationMeta {
   limit: number;
   totalPages: number;
 }
+
+export interface MasterSheetConfig {
+  masterSpreadsheetId?: string;
+  masterWebhookUrl?: string;
+  lastSyncedAt?: string;
+  syncedCount?: number;
+  status: 'connected' | 'unconnected' | 'error';
+  message?: string;
+}
+
+export interface MasterSheetRowMapping {
+  institutionId: string;
+  institutionName: string;
+  institutionCode: string;
+  spreadsheetId: string;
+  sheetWebhookUrl: string;
+  sheetTabName: string;
+  updatedAt?: string;
+}
+
+export interface MasterSheetSyncResult {
+  success: boolean;
+  message: string;
+  syncedCount: number;
+  totalInstitutions: number;
+  mappings: MasterSheetRowMapping[];
+  timestamp: string;
+}

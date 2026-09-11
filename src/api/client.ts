@@ -194,6 +194,65 @@ export const apiClient = {
     return json.script || '';
   },
 
+  // Master Google Sheet Registry APIs (Approach B)
+  async getMasterSheet(): Promise<{
+    success: boolean;
+    config: import('../types').MasterSheetConfig;
+    mappings: import('../types').MasterSheetRowMapping[];
+    totalInstitutions: number;
+  }> {
+    const res = await fetch('/api/master-sheet');
+    return res.json();
+  },
+
+  async updateMasterSheet(params: {
+    masterWebhookUrl?: string;
+    masterSpreadsheetId?: string;
+  }): Promise<{
+    success: boolean;
+    config: import('../types').MasterSheetConfig;
+    syncResult?: any;
+    mappings: import('../types').MasterSheetRowMapping[];
+  }> {
+    const res = await fetch('/api/master-sheet', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  },
+
+  async syncMasterSheet(): Promise<{
+    success: boolean;
+    message: string;
+    syncedCount: number;
+    totalInstitutions: number;
+    config: import('../types').MasterSheetConfig;
+    mappings: import('../types').MasterSheetRowMapping[];
+  }> {
+    const res = await fetch('/api/master-sheet/sync', { method: 'POST' });
+    return res.json();
+  },
+
+  async testMasterSheetWebhook(masterWebhookUrl?: string): Promise<{
+    success: boolean;
+    message: string;
+    latencyMs: number;
+  }> {
+    const res = await fetch('/api/master-sheet/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ masterWebhookUrl }),
+    });
+    return res.json();
+  },
+
+  async getMasterScriptTemplate(): Promise<string> {
+    const res = await fetch('/api/docs/master-script-template');
+    const json = await res.json();
+    return json.script || '';
+  },
+
   // Reset demo
   async resetDemoData(): Promise<void> {
     await fetch('/api/admin/reset-demo', { method: 'POST' });

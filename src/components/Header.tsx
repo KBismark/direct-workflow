@@ -20,6 +20,7 @@ interface HeaderProps {
   onOpenCreateModal?: () => void;
   onOpenApiDocs: () => void;
   onOpenSheetConfig?: () => void;
+  onOpenMasterSheetModal?: () => void;
   onToggleMobileSidebar?: () => void;
   onTestFormLink?: (token: string) => void;
 }
@@ -31,6 +32,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCreateModal,
   onOpenApiDocs,
   onOpenSheetConfig,
+  onOpenMasterSheetModal,
   onToggleMobileSidebar,
   onTestFormLink,
 }) => {
@@ -94,6 +96,19 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right: Actions */}
       <div className="flex items-center gap-3">
+        {onOpenMasterSheetModal && (
+          <button
+            id="header-master-sheet-btn"
+            onClick={onOpenMasterSheetModal}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors"
+            title="Configure Master Google Sheet registry (Approach B)"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="hidden sm:inline">Master Registry</span>
+            <span className="sm:hidden">Registry</span>
+          </button>
+        )}
+
         {currentView === 'spreadsheet' && selectedInstitution ? (
           <>
             <button

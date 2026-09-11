@@ -12,6 +12,14 @@ import {
   fetchResponsesFromGoogleSheet,
   updateStatusInGoogleSheet,
 } from './src/server/googleSheets.js';
+import {
+  getMasterSheetConfig,
+  updateMasterSheetConfig,
+  syncInstitutionsWithMasterSheet,
+  upsertInstitutionInMasterSheet,
+  testMasterSheetConnection,
+  getMasterAppsScriptTemplate,
+} from './src/server/masterSheet.js';
 import { sendSms } from './src/server/sms.js';
 import { FormSubmissionData, FormSubmissionRecord } from './src/types.js';
 
@@ -75,12 +83,30 @@ async function startServer() {
   });
 
   // Update institution (e.g. update Google Sheet ID or webhook)
-  app.put('/api/institutions/:id', (req: Request, res: Response) => {
+  app.put('/api/institutions/:id', async (req: Request, res: Response) => {
     const updated = db.updateInstitution(req.params.id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Institution not found.' });
     }
-    res.json({ success: true, data: updated });
+
+    // Approach B: Automatically reflect in Master Google Sheet registry row
+    // If a row exists for that institution id, it updates it. If no row exists, it adds one!
+    let masterSheetSyncResult: any = null;
+    try {
+      masterSheetSyncResult = await upsertInstitutionInMasterSheet(updated);
+    } catch (err: any) {
+      console.warn('Master Google Sheet upsert notice:', err.message);
+      masterSheetSyncResult = { success: false, message: err.message };
+    }
+
+    res.json({
+      success: true,
+      data: updated,
+      masterSheetSync: masterSheetSyncResult,
+      message: masterSheetSyncResult?.success
+        ? `Institution updated and reflected in Master Google Sheet registry row.`
+        : `Institution updated locally.${masterSheetSyncResult?.message ? ` (${masterSheetSyncResult.message})` : ''}`,
+    });
   });
 
   // -------------------------------------------------------------
@@ -476,6 +502,69 @@ async function startServer() {
     res.json({
       success: true,
       script: getGoogleAppsScriptTemplate(),
+    });
+  });
+
+  // Master Google Sheet Registry endpoints (Approach B)
+  // Get master sheet configuration, sync status, and registered mappings
+  app.get('/api/master-sheet', (req: Request, res: Response) => {
+    const config = getMasterSheetConfig();
+    const mappings = db.getMasterMappings();
+    res.json({
+      success: true,
+      config,
+      mappings,
+      totalInstitutions: db.getInstitutions().length,
+    });
+  });
+
+  // Update master sheet configuration (Webhook URL or Spreadsheet ID)
+  app.put('/api/master-sheet', async (req: Request, res: Response) => {
+    const { masterWebhookUrl, masterSpreadsheetId } = req.body || {};
+    const updatedConfig = updateMasterSheetConfig({ masterWebhookUrl, masterSpreadsheetId });
+
+    // Automatically trigger sync if webhook or spreadsheetId is provided
+    let syncResult: any = null;
+    if (updatedConfig.masterWebhookUrl || updatedConfig.masterSpreadsheetId) {
+      try {
+        syncResult = await syncInstitutionsWithMasterSheet();
+      } catch (err: any) {
+        syncResult = { success: false, message: err.message };
+      }
+    }
+
+    res.json({
+      success: true,
+      config: updatedConfig,
+      syncResult,
+      mappings: db.getMasterMappings(),
+    });
+  });
+
+  // Manually trigger immediate synchronization from Master Google Sheet
+  app.post('/api/master-sheet/sync', async (req: Request, res: Response) => {
+    const result = await syncInstitutionsWithMasterSheet();
+    res.json({
+      success: result.success,
+      message: result.message,
+      syncedCount: result.syncedCount,
+      totalInstitutions: result.totalInstitutions,
+      config: getMasterSheetConfig(),
+      mappings: db.getMasterMappings(),
+    });
+  });
+
+  // Test connection to Master Google Sheet Webhook
+  app.post('/api/master-sheet/test', async (req: Request, res: Response) => {
+    const result = await testMasterSheetConnection(req.body?.masterWebhookUrl);
+    res.json(result);
+  });
+
+  // Master Registry Apps Script template code
+  app.get('/api/docs/master-script-template', (req: Request, res: Response) => {
+    res.json({
+      success: true,
+      script: getMasterAppsScriptTemplate(),
     });
   });
 

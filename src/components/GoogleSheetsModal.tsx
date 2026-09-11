@@ -241,6 +241,17 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                 />
               </div>
             </div>
+
+            {/* Master Sheet Auto-Sync Notice */}
+            <div className="p-3 bg-emerald-50/80 border border-emerald-200/80 rounded-lg text-xs text-emerald-900 flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold block text-emerald-950">Master Google Sheet Registry (Approach B)</span>
+                <span className="text-[11px] text-emerald-800">
+                  When you save, this institution's Spreadsheet ID and Webhook URL will automatically update its row in the Master Google Sheet (or add a new row if one does not exist yet).
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* Test connection and Push All responses */}
