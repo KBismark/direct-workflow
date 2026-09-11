@@ -1,8 +1,8 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { db, getDefaultSheetTabName } from './src/server/db.js';
-import { getInstitutions, ensureInstitutionsLoaded } from './src/server/postgres.js';
+import { db, getDefaultSheetTabName, reverseEngineerInstitutionCode } from './src/server/db.js';
+import { getInstitutions, ensureInstitutionsLoaded, getInstitutionFromPostgresById } from './src/server/postgres.js';
 import {
   syncSubmissionToGoogleSheet,
   testGoogleSheetWebhook,
@@ -63,8 +63,11 @@ async function startServer() {
   });
 
   // Get single institution
-  app.get('/api/institutions/:id', (req: Request, res: Response) => {
-    const inst = db.getInstitutionById(req.params.id);
+  app.get('/api/institutions/:id', async (req: Request, res: Response) => {
+    let inst = db.getInstitutionById(req.params.id);
+    if (!inst) {
+      inst = await getInstitutionFromPostgresById(req.params.id);
+    }
     if (!inst) {
       return res.status(404).json({ success: false, error: 'Institution not found.' });
     }
@@ -85,8 +88,21 @@ async function startServer() {
   // -------------------------------------------------------------
 
   // Validate public token & retrieve institution metadata for the form view
-  app.get('/api/public/institution/:token', (req: Request, res: Response) => {
-    const inst = db.getInstitutionByToken(req.params.token);
+  app.get('/api/public/institution/:token', async (req: Request, res: Response) => {
+    const rawToken = req.params.token;
+
+    // Use reverseEngineerInstitutionCode to derive institution ID from the institution code
+    const initId = reverseEngineerInstitutionCode(rawToken);
+    let inst = !isNaN(initId) ? db.getInstitutionById(String(initId)) : undefined;
+
+    if (!inst && !isNaN(initId)) {
+      inst = await getInstitutionFromPostgresById(initId);
+    }
+
+    if (!inst) {
+      inst = db.getInstitutionByToken(rawToken);
+    }
+
     if (!inst) {
       return res.status(404).json({
         success: false,
@@ -110,7 +126,20 @@ async function startServer() {
 
   // Public submission endpoint - routes data to this specific institution
   app.post('/api/public/submit/:token', async (req: Request, res: Response) => {
-    const inst = db.getInstitutionByToken(req.params.token);
+    const rawToken = req.params.token;
+
+    // Use reverseEngineerInstitutionCode to derive institution ID from the institution code
+    const initId = reverseEngineerInstitutionCode(rawToken);
+    let inst = !isNaN(initId) ? db.getInstitutionById(String(initId)) : undefined;
+
+    if (!inst && !isNaN(initId)) {
+      inst = await getInstitutionFromPostgresById(initId);
+    }
+
+    if (!inst) {
+      inst = db.getInstitutionByToken(rawToken);
+    }
+
     if (!inst) {
       return res.status(404).json({
         success: false,

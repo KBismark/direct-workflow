@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { InstitutionsList } from './components/InstitutionsList';
@@ -8,11 +8,21 @@ import { CreateInstitutionModal } from './components/CreateInstitutionModal';
 import { GoogleSheetsModal } from './components/GoogleSheetsModal';
 import { ApiDocsModal } from './components/ApiDocsModal';
 import { ResponseDetailModal } from './components/ResponseDetailModal';
-import { Institution, FormSubmissionRecord } from './types';
+import { Institution, FormSubmissionRecord, PaginationMeta } from './types';
 import { apiClient } from './api/client';
 
 export default function App() {
   const [institutions, setInstitutions] = useState<Institution[]>([]);
+  const [sidebarInstitutions, setSidebarInstitutions] = useState<Institution[]>([]);
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    total: 0,
+    page: 1,
+    limit: 10,
+    totalPages: 1,
+  });
+  const [dashboardPage, setDashboardPage] = useState(1);
+  const [dashboardSearch, setDashboardSearch] = useState('');
+
   const [selectedInstitution, setSelectedInstitution] = useState<Institution | null>(null);
   const [currentView, setCurrentView] = useState<'institutions' | 'spreadsheet' | 'public-form'>('institutions');
   const [publicToken, setPublicToken] = useState<string | null>(null);
@@ -29,22 +39,25 @@ export default function App() {
   const [dbError, setDbError] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
 
+  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
   // Detect URL parameters on load for public form links
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const token = params.get('token') || params.get('form');
+    const token = params.get('code') || params.get('token') || params.get('form');
 
     if (token) {
       setPublicToken(token);
       setCurrentView('public-form');
     }
 
-    loadInstitutions();
+    loadInstitutions(1, '');
+    loadSidebarInstitutions();
 
     // Listen to browser popstate
     const handlePopState = () => {
       const p = new URLSearchParams(window.location.search);
-      const t = p.get('token') || p.get('form');
+      const t = p.get('code') || p.get('token') || p.get('form');
       if (t) {
         setPublicToken(t);
         setCurrentView('public-form');
@@ -57,15 +70,31 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const loadInstitutions = async () => {
+  const loadSidebarInstitutions = async () => {
+    try {
+      const res = await apiClient.getInstitutions({ page: 1, limit: 8 });
+      setSidebarInstitutions(res.data);
+    } catch (err) {
+      console.warn('Could not load sidebar institutions from DB:', err);
+    }
+  };
+
+  const loadInstitutions = async (targetPage = dashboardPage, targetSearch = dashboardSearch) => {
     try {
       setIsLoading(true);
       setDbError(null);
-      const list = await apiClient.getInstitutions();
-      setInstitutions(list);
+      const res = await apiClient.getInstitutions({
+        page: targetPage,
+        limit: 10,
+        search: targetSearch,
+      });
+      setInstitutions(res.data);
+      setPagination(res.pagination);
+      setDashboardPage(res.pagination.page);
+
       // Keep selected institution in sync if open
       if (selectedInstitution) {
-        const found = list.find(i => i.id === selectedInstitution.id);
+        const found = res.data.find((i) => i.id === selectedInstitution.id);
         if (found) setSelectedInstitution(found);
       }
     } catch (err: any) {
@@ -76,13 +105,31 @@ export default function App() {
     }
   };
 
+  const handleSearchChange = (val: string) => {
+    setDashboardSearch(val);
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      loadInstitutions(1, val);
+    }, 300);
+  };
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > pagination.totalPages || newPage === dashboardPage) return;
+    setDashboardPage(newPage);
+    loadInstitutions(newPage, dashboardSearch);
+  };
+
   const handleNavigateHome = () => {
     setSelectedInstitution(null);
     setCurrentView('institutions');
     setPublicToken(null);
     setMobileSidebarOpen(false);
+    setDashboardSearch('');
     window.history.pushState({}, '', window.location.pathname);
-    loadInstitutions();
+    loadInstitutions(1, '');
+    loadSidebarInstitutions();
   };
 
   const handleSelectInstitution = (inst: Institution) => {
@@ -192,7 +239,8 @@ export default function App() {
         }`}
       >
         <Sidebar
-          institutions={institutions}
+          institutions={sidebarInstitutions.length > 0 ? sidebarInstitutions : institutions.slice(0, 8)}
+          totalInstitutionsCount={pagination.total}
           selectedInstitution={selectedInstitution}
           onSelectInstitution={handleSelectInstitution}
           onNavigateHome={handleNavigateHome}
@@ -229,11 +277,15 @@ export default function App() {
             <div className="p-6 sm:p-8 flex-1 overflow-y-auto">
               <InstitutionsList
                 institutions={institutions}
+                pagination={pagination}
+                onPageChange={handlePageChange}
+                onSearchChange={handleSearchChange}
+                searchTerm={dashboardSearch}
                 onSelectInstitution={handleSelectInstitution}
                 onOpenSheetConfig={handleOpenSheetConfig}
                 onTestFormLink={handleTestFormLink}
                 dbError={dbError}
-                onRefresh={loadInstitutions}
+                onRefresh={() => loadInstitutions(dashboardPage, dashboardSearch)}
                 isLoading={isLoading}
               />
             </div>

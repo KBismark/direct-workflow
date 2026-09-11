@@ -1,18 +1,38 @@
-import { ApiResponse, FormSubmissionData, FormSubmissionRecord, Institution, PublicInstitutionInfo } from '../types';
+import { ApiResponse, FormSubmissionData, FormSubmissionRecord, Institution, PaginationMeta, PublicInstitutionInfo } from '../types';
 
 export const apiClient = {
-  // Get list of institutions
-  async getInstitutions(): Promise<Institution[]> {
-    const res = await fetch('/api/institutions');
+  // Get list of institutions with pagination and search
+  async getInstitutions(params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+  }): Promise<{ data: Institution[]; pagination: PaginationMeta }> {
+    const searchParams = new URLSearchParams();
+    if (params?.page) searchParams.set('page', String(params.page));
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.search && params.search.trim()) searchParams.set('search', params.search.trim());
+
+    const qs = searchParams.toString();
+    const url = qs ? `/api/institutions?${qs}` : '/api/institutions';
+    const res = await fetch(url);
     const json = await res.json();
     if (!json.success || !json.data) {
       throw new Error(json.message || json.error || 'Failed to fetch institutions');
     }
-    return (json.data as any[]).map((item: any) => ({
+    const institutions: Institution[] = (json.data as any[]).map((item: any) => ({
       ...item,
       name: item.name || item.institution_name,
       institution_name: item.institution_name || item.name,
     }));
+    return {
+      data: institutions,
+      pagination: json.pagination || {
+        total: institutions.length,
+        page: params?.page || 1,
+        limit: params?.limit || institutions.length,
+        totalPages: 1,
+      },
+    };
   },
 
   // Create new institution

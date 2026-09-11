@@ -74,4 +74,12 @@ export interface ApiResponse<T = any> {
   data?: T;
   message?: string;
   error?: string;
+  pagination?: PaginationMeta;
+}
+
+export interface PaginationMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }
